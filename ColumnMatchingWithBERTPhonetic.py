@@ -25,7 +25,19 @@ import argparse
 import sys
 
 def read_input_data(file_path):
-    """Read the first column of input data from XLS, XLSX, or CSV files and rename it to 'company_name'."""
+    """
+    Read the first column of input data from XLS, XLSX, or CSV files and rename it to 'company_name'.
+
+    Args:
+        file_path (str): The path to the input file.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the first column renamed to 'company_name'.
+
+    Raises:
+        FileNotFoundError: If the specified file does not exist.
+        ValueError: If the file format is not supported (.xls, .xlsx, or .csv).
+    """
     try:
         if file_path.endswith(('.xls', '.xlsx')):
             df = pd.read_excel(file_path, usecols=[0])
@@ -40,7 +52,19 @@ def read_input_data(file_path):
         raise FileNotFoundError(f"Input file not found: {file_path}")
 
 def read_compustat_data(file_path):
-    """Read Compustat data from XLS, XLSX, or CSV files."""
+    """
+    Read Compustat data from XLS, XLSX, or CSV files.
+
+    Args:
+        file_path (str): The path to the Compustat data file.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the Compustat data.
+
+    Raises:
+        FileNotFoundError: If the specified file does not exist.
+        ValueError: If the file format is not supported (.xls, .xlsx, or .csv).
+    """
     try:
         if file_path.endswith(('.xls', '.xlsx')):
             return pd.read_excel(file_path)
@@ -52,7 +76,16 @@ def read_compustat_data(file_path):
         raise FileNotFoundError(f"Compustat file not found: {file_path}")
 
 def clean_company_name(name):
-    """Clean company name by converting to lowercase, removing punctuation, and trimming common suffixes."""
+    """
+    Clean company name by converting to lowercase, removing punctuation,
+    normalizing whitespace, and trimming common company suffixes.
+
+    Args:
+        name (str): The company name to clean.
+
+    Returns:
+        str: The cleaned company name. Returns an empty string if input is not a string.
+    """
     if not isinstance(name, str):
         return ""
     name = name.lower()
@@ -65,7 +98,17 @@ def clean_company_name(name):
     return name
 
 def normalize_embeddings(embeddings):
-    """Normalize embeddings to unit length to ensure consistent similarity comparisons."""
+    """
+    Normalize embeddings to unit length. This is crucial for cosine similarity
+    calculations, as L2 distance between normalized vectors directly relates to
+    cosine similarity (D = 2 - 2*CosineSimilarity).
+
+    Args:
+        embeddings (np.ndarray): A 2D numpy array of embeddings.
+
+    Returns:
+        np.ndarray: Normalized embeddings. Handles zero-norm vectors by preventing division by zero.
+    """
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
     return embeddings / np.where(norms == 0, 1, norms)
 
@@ -78,7 +121,16 @@ except Exception as e:
     raise RuntimeError(f"Failed to initialize SentenceTransformer model: {e}")
 
 def get_bert_embeddings(texts, batch_size=32):
-    """Generate BERT embeddings for a list of texts in batches for efficiency."""
+    """
+    Generate BERT embeddings for a list of texts in batches.
+
+    Args:
+        texts (list): A list of strings for which to generate embeddings.
+        batch_size (int): The number of texts to process in each batch.
+
+    Returns:
+        np.ndarray: A 2D numpy array where each row is the embedding for a text.
+    """
     embeddings = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
@@ -87,7 +139,21 @@ def get_bert_embeddings(texts, batch_size=32):
     return np.vstack(embeddings)
 
 def process_chunk(chunk_data, compustat_data, compustat_embeddings_conm, compustat_embeddings_conml, compustat_clean_names_conm, compustat_clean_names_conml, score_cutoff=0.85):
-    """Process a chunk of company names using FAISS for similarity search and phonetic matching."""
+    """
+    Process a chunk of company names using pre-built FAISS indices for similarity search.
+    This function is designed to be run in parallel across multiple CPU cores.
+
+    Args:
+        chunk_data (list): A list of company names from the input file to process in this chunk.
+        compustat_data (pd.DataFrame): The full Compustat DataFrame.
+        compustat_embeddings_conm (np.ndarray): Normalized BERT embeddings for 'conm' names.
+        compustat_embeddings_conml (np.ndarray): Normalized BERT embeddings for 'conml' names.
+        compustat_clean_names_conm (list): Cleaned 'conm' names from Compustat.
+        compustat_clean_names_conml (list): Cleaned 'conml' names from Compustat.
+
+    Returns:
+        list: A list of lists, where each inner list contains match results for one company.
+    """
     results = []
 
     # Build FAISS indices for efficient similarity search on conm and conml embeddings
@@ -142,7 +208,14 @@ def process_chunk(chunk_data, compustat_data, compustat_embeddings_conm, compust
     return results
 
 def company_match_phonetic(input_file_path, compustat_file_path):
-    """Match company names from input file with Compustat data using BERT embeddings, FAISS, and phonetic matching."""
+    """
+    Match company names from an input file with Compustat data using BERT embeddings
+    and FAISS for efficient similarity search. Leverages parallel processing for speed.
+
+    Args:
+        input_file_path (str): Path to the file containing company names to match.
+        compustat_file_path (str): Path to the Compustat database file.
+    """
     try:
         # Load input and Compustat data
         input_data = read_input_data(input_file_path)
