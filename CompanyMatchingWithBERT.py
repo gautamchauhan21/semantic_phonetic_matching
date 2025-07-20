@@ -62,6 +62,13 @@ def clean_company_name(name):
         name = ' '.join(words[:-1])
     return name
 
+def normalize_embeddings(embeddings):
+    """Normalize embeddings to unit length to ensure consistent similarity comparisons."""
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    # Avoid division by zero for embeddings that are all zeros
+    return embeddings / np.where(norms == 0, 1, norms)
+
+
 # Initialize SentenceTransformer model
 try:
     model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -93,13 +100,18 @@ def process_chunk(chunk_data, compustat_data, compustat_embeddings_conm, compust
     # Clean and encode chunk of company names
     clean_inputs = [clean_company_name(name) for name in chunk_data]
     input_embeddings = get_bert_embeddings(clean_inputs)
+    # Apply normalization to input embeddings
+    input_embeddings = normalize_embeddings(input_embeddings)
+
 
     for i, (company_name, clean_input, input_embedding) in enumerate(zip(chunk_data, clean_inputs, input_embeddings)):
         # Search FAISS indices for nearest neighbors
+        # Ensure the input embedding for search is also 2D and float32
         D_conm, I_conm = index_conm.search(np.array([input_embedding]).astype(np.float32), 1)
         D_conml, I_conml = index_conml.search(np.array([input_embedding]).astype(np.float32), 1)
 
         # Convert L2 distance to cosine similarity
+        # For L2 normalized embeddings (unit length), L2 distance D is related to cosine similarity S by D = 2 - 2S, so S = 1 - D/2
         sim_conm = 1 - D_conm[0][0] / 2
         sim_conml = 1 - D_conml[0][0] / 2
 
@@ -146,9 +158,14 @@ def company_match(input_file_path, compustat_file_path):
 
         # Precompute BERT embeddings for Compustat data
         print("Precomputing BERT embeddings for Compustat data...")
-        compustat_embeddings_conm = get_bert_embeddings(compustat_clean_names_conm)
-        compustat_embeddings_conml = get_bert_embeddings(compustat_clean_names_conml)
-        print("Embeddings computed.")
+        raw_compustat_embeddings_conm = get_bert_embeddings(compustat_clean_names_conm)
+        raw_compustat_embeddings_conml = get_bert_embeddings(compustat_clean_names_conml)
+
+        # Apply normalization to Compustat embeddings
+        compustat_embeddings_conm = normalize_embeddings(raw_compustat_embeddings_conm)
+        compustat_embeddings_conml = normalize_embeddings(raw_compustat_embeddings_conml)
+
+        print("Embeddings computed and normalized.")
 
         # Set up log file
         today = datetime.now().strftime("%Y%m%d")
