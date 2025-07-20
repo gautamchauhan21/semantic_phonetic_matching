@@ -25,19 +25,22 @@ import argparse
 import sys
 
 def read_input_data(file_path):
-    """Read input data from xls, xlsx, or csv files."""
+    """Read the first column of input data from XLS, XLSX, or CSV files and rename it to 'company_name'."""
     try:
         if file_path.endswith(('.xls', '.xlsx')):
-            return pd.read_excel(file_path, usecols=[0])
+            df = pd.read_excel(file_path, usecols=[0])
         elif file_path.endswith('.csv'):
-            return pd.read_csv(file_path, usecols=[0])
+            df = pd.read_csv(file_path, usecols=[0])
         else:
             raise ValueError("Unsupported file format. Please provide a .xls, .xlsx, or .csv file.")
+        # Rename the first column to 'company_name' for consistent processing
+        df.columns = ['company_name']
+        return df
     except FileNotFoundError:
         raise FileNotFoundError(f"Input file not found: {file_path}")
 
 def read_compustat_data(file_path):
-    """Read Compustat data from xls, xlsx, or csv files."""
+    """Read Compustat data from XLS, XLSX, or CSV files."""
     try:
         if file_path.endswith(('.xls', '.xlsx')):
             return pd.read_excel(file_path)
@@ -49,33 +52,33 @@ def read_compustat_data(file_path):
         raise FileNotFoundError(f"Compustat file not found: {file_path}")
 
 def clean_company_name(name):
-    """Clean company name by normalizing case, removing punctuation, and trimming suffixes."""
+    """Clean company name by converting to lowercase, removing punctuation, and trimming common suffixes."""
     if not isinstance(name, str):
         return ""
     name = name.lower()
-    name = re.sub(r'[^\w\s]', '', name)
-    name = re.sub(r'\s+', ' ', name).strip()
+    name = re.sub(r'[^\w\s]', '', name)  # Remove punctuation
+    name = re.sub(r'\s+', ' ', name).strip()  # Normalize whitespace
     suffixes = ['inc', 'corp', 'corporation', 'co', 'company', 'ltd', 'limited']
     words = name.split()
     if words and words[-1] in suffixes:
-        name = ' '.join(words[:-1])
+        name = ' '.join(words[:-1])  # Remove suffix if present
     return name
 
 def normalize_embeddings(embeddings):
-    """Normalize embeddings to unit length."""
+    """Normalize embeddings to unit length to ensure consistent similarity comparisons."""
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
     return embeddings / np.where(norms == 0, 1, norms)
 
-# Initialize SentenceTransformer model
+# Initialize SentenceTransformer model for generating BERT embeddings
 try:
     model = SentenceTransformer('all-MiniLM-L6-v2')
     device = 'mps' if torch.backends.mps.is_available() else 'cpu'
-    model = model.to(device)
+    model = model.to(device)  # Move model to appropriate device (MPS or CPU)
 except Exception as e:
     raise RuntimeError(f"Failed to initialize SentenceTransformer model: {e}")
 
 def get_bert_embeddings(texts, batch_size=32):
-    """Generate BERT embeddings for a list of texts in batches."""
+    """Generate BERT embeddings for a list of texts in batches for efficiency."""
     embeddings = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
@@ -83,19 +86,11 @@ def get_bert_embeddings(texts, batch_size=32):
         embeddings.append(batch_embeddings)
     return np.vstack(embeddings)
 
-def phonetic_similarity(name1, name2):
-    """Compute phonetic similarity between two names using Soundex."""
-    if not name1 or not name2:
-        return 0.0
-    code1 = jellyfish.soundex(name1)
-    code2 = jellyfish.soundex(name2)
-    return 1.0 if code1 == code2 else 0.0
-
 def process_chunk(chunk_data, compustat_data, compustat_embeddings_conm, compustat_embeddings_conml, compustat_clean_names_conm, compustat_clean_names_conml, score_cutoff=0.85):
-    """Process a chunk of company names with FAISS and phonetic matching."""
+    """Process a chunk of company names using FAISS for similarity search and phonetic matching."""
     results = []
 
-    # Build FAISS indices for conm and conml embeddings
+    # Build FAISS indices for efficient similarity search on conm and conml embeddings
     d = compustat_embeddings_conm.shape[1]
     index_conm = faiss.IndexFlatL2(d)
     index_conml = faiss.IndexFlatL2(d)
@@ -108,8 +103,9 @@ def process_chunk(chunk_data, compustat_data, compustat_embeddings_conm, compust
     input_embeddings = normalize_embeddings(input_embeddings)
     phonetic_inputs = [jellyfish.soundex(name) if name else "" for name in clean_inputs]
 
+    # Process each company name in the chunk
     for i, (company_name, clean_input, input_embedding, phonetic_input) in enumerate(zip(chunk_data, clean_inputs, input_embeddings, phonetic_inputs)):
-        # Search FAISS indices for nearest neighbors
+        # Search for nearest neighbors in FAISS indices
         D_conm, I_conm = index_conm.search(np.array([input_embedding]).astype(np.float32), 1)
         D_conml, I_conml = index_conml.search(np.array([input_embedding]).astype(np.float32), 1)
 
@@ -128,13 +124,13 @@ def process_chunk(chunk_data, compustat_data, compustat_embeddings_conm, compust
         elif clean_input and compustat_clean_names_conml[I_conml[0][0]] and phonetic_input == jellyfish.soundex(compustat_clean_names_conml[I_conml[0][0]]):
             sim_conml = min(sim_conml + 0.05, 1.0)
 
-        # Select best match based on similarity
+        # Select the best match based on highest similarity
         max_sim = max(sim_conm, sim_conml)
         max_index = I_conm[0][0] if sim_conm >= sim_conml else I_conml[0][0]
 
         if max_sim >= score_cutoff:
             best_match = compustat_data['conm'].iloc[max_index]
-            confidence = max_sim * 100
+            confidence = round(max_sim * 100, 2)
             matched_conml = compustat_data.at[max_index, 'conml']
             matched_gvkey = compustat_data.at[max_index, 'gvkey']
             results.append([company_name, best_match, matched_conml, matched_gvkey, confidence])
@@ -146,30 +142,30 @@ def process_chunk(chunk_data, compustat_data, compustat_embeddings_conm, compust
     return results
 
 def company_match_phonetic(input_file_path, compustat_file_path):
-    """Match company names from input file with Compustat data using BERT, FAISS, and phonetic matching."""
+    """Match company names from input file with Compustat data using BERT embeddings, FAISS, and phonetic matching."""
     try:
-        # Read input and Compustat data
+        # Load input and Compustat data
         input_data = read_input_data(input_file_path)
         compustat_data = read_compustat_data(compustat_file_path)
 
-        # Deduplicate Compustat data by gvkey and conm
+        # Deduplicate Compustat data by gvkey and conm to avoid redundant matches
         compustat_data = compustat_data.drop_duplicates(subset=['gvkey', 'conm']).reset_index(drop=True)
 
-        column_name = input_data.columns[0]
-        company_names = input_data[column_name].tolist()
+        # Extract company names from the renamed 'company_name' column
+        company_names = input_data['company_name'].tolist()
 
-        # Clean Compustat company names
+        # Clean Compustat company names for consistent matching
         print("Cleaning Compustat names...")
         compustat_clean_names_conm = [clean_company_name(name) for name in compustat_data['conm']]
         compustat_clean_names_conml = [clean_company_name(name) for name in compustat_data['conml']]
 
-        # Precompute and normalize BERT embeddings
+        # Precompute and normalize BERT embeddings for Compustat data
         print("Precomputing BERT embeddings for Compustat data...")
         compustat_embeddings_conm = normalize_embeddings(get_bert_embeddings(compustat_clean_names_conm))
         compustat_embeddings_conml = normalize_embeddings(get_bert_embeddings(compustat_clean_names_conml))
         print("Embeddings computed.")
 
-        # Set up log file
+        # Set up log file with timestamp
         today = datetime.now().strftime("%Y%m%d")
         log_file = f"{os.path.splitext(input_file_path)[0]}-{today}-Log.txt"
         with open(log_file, "w") as log:
@@ -181,7 +177,7 @@ def company_match_phonetic(input_file_path, compustat_file_path):
         chunk_size = max(1, len(company_names) // num_cores)
         chunks = [company_names[i:i + chunk_size] for i in range(0, len(company_names), chunk_size)]
 
-        # Process chunks in parallel
+        # Process chunks in parallel using multiple CPU cores
         print(f"Processing {len(company_names)} names using {num_cores} cores...")
         partial_process = partial(
             process_chunk,
@@ -195,16 +191,16 @@ def company_match_phonetic(input_file_path, compustat_file_path):
         with Pool(num_cores) as pool:
             results = pool.map(partial_process, chunks)
 
-        # Flatten results
+        # Flatten results from all chunks
         results = [item for sublist in results for item in sublist]
 
-        # Log completion
+        # Log completion of processing
         with open(log_file, "a") as log:
             log.write(f"Completed processing of {len(company_names)} rows.\n")
 
-        # Save results to CSV
+        # Save results to CSV with 'company name' as the first column header
         output_file = f"{os.path.splitext(input_file_path)[0]}-{today}-Output.csv"
-        output_df = pd.DataFrame(results, columns=[column_name, "conm", "conml", "gvkey", "Confidence"])
+        output_df = pd.DataFrame(results, columns=["company name", "conm", "conml", "gvkey", "confidence"])
         output_df.to_csv(output_file, index=False)
 
         print(f"\nProcessing completed. Output saved to {output_file} and log saved to {log_file}.")

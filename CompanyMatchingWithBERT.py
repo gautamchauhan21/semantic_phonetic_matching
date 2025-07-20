@@ -23,14 +23,17 @@ import argparse
 import sys
 
 def read_input_data(file_path):
-    """Read input data from xls, xlsx, or csv files."""
+    """Read the first column of input data from XLS, XLSX, or CSV files and rename it to 'company_name'."""
     try:
         if file_path.endswith(('.xls', '.xlsx')):
-            return pd.read_excel(file_path, usecols=[0])
+            df = pd.read_excel(file_path, usecols=[0])
         elif file_path.endswith('.csv'):
-            return pd.read_csv(file_path, usecols=[0])
+            df = pd.read_csv(file_path, usecols=[0])
         else:
             raise ValueError("Unsupported file format. Please provide a .xls, .xlsx, or .csv file.")
+        # Rename the first column to 'company_name' for consistent processing
+        df.columns = ['company_name']
+        return df
     except FileNotFoundError:
         raise FileNotFoundError(f"Input file not found: {file_path}")
 
@@ -112,7 +115,7 @@ def process_chunk(chunk_data, compustat_data, compustat_embeddings_conm, compust
 
         if max_sim >= score_cutoff:
             best_match = compustat_data['conm'].iloc[max_index]
-            confidence = max_sim * 100
+            confidence = round(max_sim * 100, 2)
             matched_conml = compustat_data.at[max_index, 'conml']
             matched_gvkey = compustat_data.at[max_index, 'gvkey']
             results.append([company_name, best_match, matched_conml, matched_gvkey, confidence])
@@ -182,7 +185,7 @@ def company_match(input_file_path, compustat_file_path):
 
         # Save results to CSV
         output_file = f"{os.path.splitext(input_file_path)[0]}-{today}-Output.csv"
-        output_df = pd.DataFrame(results, columns=[column_name, "conm", "conml", "gvkey", "Confidence"])
+        output_df = pd.DataFrame(results, columns=["company name", "conm", "conml", "gvkey", "confidence"])
         output_df.to_csv(output_file, index=False)
 
         print(f"\nProcessing completed. Output saved to {output_file} and log saved to {log_file}.")
