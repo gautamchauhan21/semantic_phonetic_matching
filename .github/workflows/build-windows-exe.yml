@@ -18,11 +18,9 @@ jobs:
         with:
           python-version: "3.13"
 
+      # Windows checkouts turn line endings into CRLF; restore LF so the copies are byte-identical to v1.0.0.
       - name: Copy the v1.0.0 scripts and confirm they are unchanged
-        shell: pwsh
-        run: |
-          Copy-Item CompanyMatchingWithBERT.py, ColumnMatchingWithBERTPhonetic.py windows_build/src/
-          python -c "import hashlib,sys; e={'CompanyMatchingWithBERT.py':'70c5d64788da996f470788c6868eda89','ColumnMatchingWithBERTPhonetic.py':'ae7eb99436813f6f4f46b951c5b79e13'}; bad=[f for f,h in e.items() if hashlib.md5(open('windows_build/src/'+f,'rb').read()).hexdigest()!=h]; print('scripts match v1.0.0:', not bad); sys.exit(1 if bad else 0)"
+        run: python -c "import hashlib,sys; e={'CompanyMatchingWithBERT.py':'70c5d64788da996f470788c6868eda89','ColumnMatchingWithBERTPhonetic.py':'ae7eb99436813f6f4f46b951c5b79e13'}; d={f:open(f,'rb').read().replace(b'\r\n',b'\n') for f in e}; [open('windows_build/src/'+f,'wb').write(b) for f,b in d.items()]; bad=[f for f,h in e.items() if hashlib.md5(open('windows_build/src/'+f,'rb').read()).hexdigest()!=h]; print('scripts match v1.0.0:', not bad); sys.exit(1 if bad else 0)"
 
       - name: Install libraries (CPU-only torch)
         run: |
