@@ -1,0 +1,65 @@
+# GitHub Actions recipe: builds CompanyMatch.exe on a Windows machine from the v1.0.0 scripts.
+# Lives at .github/workflows/build-windows-exe.yml on the build-windows-exe branch.
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [build-windows-exe]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Copy the v1.0.0 scripts and confirm they are unchanged
+        shell: pwsh
+        run: |
+          Copy-Item CompanyMatchingWithBERT.py, ColumnMatchingWithBERTPhonetic.py windows_build/src/
+          python -c "import hashlib,sys; e={'CompanyMatchingWithBERT.py':'70c5d64788da996f470788c6868eda89','ColumnMatchingWithBERTPhonetic.py':'ae7eb99436813f6f4f46b951c5b79e13'}; bad=[f for f,h in e.items() if hashlib.md5(open('windows_build/src/'+f,'rb').read()).hexdigest()!=h]; print('scripts match v1.0.0:', not bad); sys.exit(1 if bad else 0)"
+
+      - name: Install libraries (CPU-only torch)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r windows_build/build_kit/requirements.txt
+
+      - name: Bundle the model
+        working-directory: windows_build/build_kit
+        run: python prepare_model.py
+
+      - name: Build CompanyMatch.exe
+        working-directory: windows_build/build_kit
+        run: pyinstaller --noconfirm CompanyMatch.spec
+
+      - name: Smoke test (made-up company names only)
+        working-directory: windows_build/build_kit
+        run: python smoke_test.py dist/CompanyMatch/CompanyMatch.exe
+
+      - name: Zip the program
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path windows_build/build_kit/dist/CompanyMatch) {
+            Compress-Archive -Path windows_build/build_kit/dist/CompanyMatch -DestinationPath CompanyMatch-v1.0.0-windows.zip
+          }
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: CompanyMatch-v1.0.0-windows
+          path: CompanyMatch-v1.0.0-windows.zip
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-logs
+          path: windows_build/build_kit/smoke_test_run/**/console.log
+          retention-days: 30

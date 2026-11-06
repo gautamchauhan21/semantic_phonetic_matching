@@ -1,0 +1,7 @@
+build_kit/model_bundle/
+build_kit/build/
+build_kit/dist/
+build_kit/smoke_test_run/
+build_kit/.venv/
+src/CompanyMatchingWithBERT.py
+src/ColumnMatchingWithBERTPhonetic.py
